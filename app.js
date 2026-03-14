@@ -63,7 +63,8 @@ function toggleTheme() {
     if(currentChart && document.getElementById('studentModal').classList.contains('show')) {
         // Redraw chart with new theme colors
         const activeRegNo = document.getElementById('modalTitle').getAttribute('data-reg');
-        if(activeRegNo) renderChartForStudent(activeRegNo);
+        const activeSemester = document.getElementById('modalTitle').getAttribute('data-semester');
+        if(activeRegNo) renderChartForStudent(activeRegNo, activeSemester);
     }
 }
 
@@ -273,7 +274,7 @@ function renderPage(page) {
         card.className = 'col-lg-4 col-md-6 mb-4';
         card.style.animationDelay = `${delay}s`;
         card.innerHTML = `
-            <div class="card h-100 student-card" onclick="showStudentDetails('${student.regNo}')">
+            <div class="card h-100 student-card" onclick="showStudentDetails('${student.regNo}', '${student.semester}')">
                 <span class="status-badge ${badgeClass} fw-bold"><i class="fas ${isPass ? 'fa-check-circle' : 'fa-times-circle'} me-1"></i>${statusText}</span>
                 <div class="card-body p-4 d-flex flex-column">
                     <div class="d-flex align-items-center mb-4">
@@ -282,7 +283,8 @@ function renderPage(page) {
                         </div>
                         <div class="overflow-hidden">
                             <h5 class="card-title mb-1 fw-bold text-truncate" title="${student.name}">${student.name}</h5>
-                            <small class="text-muted"><i class="fas fa-id-card me-1"></i>${student.regNo}</small>
+                            <small class="text-muted d-block mb-1"><i class="fas fa-id-card me-1"></i>${student.regNo}</small>
+                            <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle">Semester ${student.semester}</span>
                         </div>
                     </div>
 
@@ -292,13 +294,17 @@ function renderPage(page) {
                     </div>
 
                     <div class="row g-0 pt-3 border-top mt-auto text-center">
-                        <div class="col-6 border-end">
+                        <div class="col-4 border-end">
                             <span class="d-block small text-muted text-uppercase fw-bold mb-1" style="font-size: 0.7rem; letter-spacing: 0.5px;">SGPA</span>
-                            <span class="fs-4 fw-bold ${student.sgpaNum >= 8 ? 'text-success' : 'text-primary'}">${student.sgpaNum.toFixed(2) || 'N/A'}</span>
+                            <span class="fs-5 fw-bold ${student.sgpaNum >= 8 ? 'text-success' : 'text-primary'}">${student.sgpaNum ? student.sgpaNum.toFixed(2) : 'N/A'}</span>
                         </div>
-                        <div class="col-6">
-                            <span class="d-block small text-muted text-uppercase fw-bold mb-1" style="font-size: 0.7rem; letter-spacing: 0.5px;">Total Marks</span>
-                            <span class="fs-4 fw-bold">${totalScore}</span>
+                        <div class="col-4 border-end">
+                            <span class="d-block small text-muted text-uppercase fw-bold mb-1" style="font-size: 0.7rem; letter-spacing: 0.5px;">CGPA</span>
+                            <span class="fs-5 fw-bold text-info">${student.cgpa && !isNaN(parseFloat(student.cgpa)) ? parseFloat(student.cgpa).toFixed(2) : '-'}</span>
+                        </div>
+                        <div class="col-4">
+                            <span class="d-block small text-muted text-uppercase fw-bold mb-1" style="font-size: 0.7rem; letter-spacing: 0.5px;">Total</span>
+                            <span class="fs-5 fw-bold">${totalScore}</span>
                         </div>
                     </div>
                 </div>
@@ -360,12 +366,19 @@ function renderPagination() {
 }
 
 // Ensure the student details modal function is accessible globally
-window.showStudentDetails = function(regNo) {
-    const student = allData.find(s => s.regNo === regNo);
+window.showStudentDetails = function(regNo, semester) {
+    let student;
+    if (semester && semester !== 'undefined') {
+        student = allData.find(s => s.regNo === regNo && s.semester === semester);
+    } else {
+        student = allData.find(s => s.regNo === regNo);
+    }
+    console.log('showing details for:', regNo, semester, student);
     if(!student) return;
 
     // Store active student for theme switching
     document.getElementById('modalTitle').setAttribute('data-reg', regNo);
+    document.getElementById('modalTitle').setAttribute('data-semester', student.semester);
     document.getElementById('modalTitle').textContent = `${student.name} - Official Record`;
 
     const isPass = student.fail_any === 'PASS';
@@ -451,9 +464,15 @@ window.showStudentDetails = function(regNo) {
                             <span class="d-block text-muted text-uppercase fw-bold mb-2 small" style="letter-spacing: 1px;">Semester ${student.semester} (${student.exam_held})</span>
                             <div class="d-flex justify-content-center align-items-end gap-3 mb-3">
                                 <div>
-                                    <h1 class="display-3 fw-bold mb-0 ${student.sgpaNum >= 8 ? 'text-success' : 'text-primary'}">${student.sgpaNum.toFixed(2)}</h1>
+                                    <h1 class="display-5 fw-bold mb-0 ${student.sgpaNum >= 8 ? 'text-success' : 'text-primary'}">${student.sgpaNum ? student.sgpaNum.toFixed(2) : 'N/A'}</h1>
                                     <span class="text-muted fw-bold small">SGPA</span>
                                 </div>
+                                ${student.cgpa && !isNaN(parseFloat(student.cgpa)) ? `
+                                <div class="border-start ps-3 px-2">
+                                    <h1 class="display-5 fw-bold mb-0 ${parseFloat(student.cgpa) >= 8 ? 'text-success' : 'text-info'}">${parseFloat(student.cgpa).toFixed(2)}</h1>
+                                    <span class="text-muted fw-bold small">CGPA</span>
+                                </div>
+                                ` : ''}
                             </div>
                             <span class="badge ${isPass ? 'bg-success' : 'bg-danger'} px-4 py-2 fs-6 rounded-pill w-100 shadow-sm">
                                 <i class="fas ${isPass ? 'fa-check-circle' : 'fa-times-circle'} me-1"></i> STATUS: ${isPass ? 'PASS' : 'FAIL'}
@@ -471,13 +490,13 @@ window.showStudentDetails = function(regNo) {
                     <button class="nav-link active fw-bold" id="marks-tab" data-bs-toggle="tab" data-bs-target="#marks" type="button" role="tab"><i class="fas fa-list-alt me-2"></i>Detailed Marks</button>
                 </li>
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link fw-bold" id="chart-tab" data-bs-toggle="tab" data-bs-target="#chart" type="button" role="tab" onclick="renderChartForStudent('${student.regNo}')"><i class="fas fa-chart-bar me-2"></i>Performance Chart</button>
+                    <button class="nav-link fw-bold" id="chart-tab" data-bs-toggle="tab" data-bs-target="#chart" type="button" role="tab" onclick="renderChartForStudent('${student.regNo}', '${student.semester}')"><i class="fas fa-chart-bar me-2"></i>Performance Chart</button>
                 </li>
             </ul>
 
             <div class="tab-content" id="myTabContent">
                 <div class="tab-pane fade show active" id="marks" role="tabpanel">
-                    <div class="table-responsive bg-card rounded shadow-sm border">
+                    <div class="table-responsive bg-card rounded shadow-sm border" style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
                         <table class="table table-hover table-custom align-middle mb-0">
                             <thead>
                                 <tr>
@@ -519,8 +538,13 @@ window.showStudentDetails = function(regNo) {
     studentModal.show();
 }
 
-window.renderChartForStudent = function(regNo) {
-    const student = allData.find(s => s.regNo === regNo);
+window.renderChartForStudent = function(regNo, semester) {
+    let student;
+    if (semester && semester !== 'undefined') {
+        student = allData.find(s => s.regNo === regNo && s.semester === semester);
+    } else {
+        student = allData.find(s => s.regNo === regNo);
+    }
     if(!student) return;
 
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
