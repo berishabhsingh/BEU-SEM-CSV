@@ -274,3 +274,45 @@ body {
         border: 1px solid #ddd;
     }
 }
+
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+    .modal-dialog {
+        margin: 0.5rem;
+    }
+
+    .modal-header-info {
+        padding: 1rem !important;
+    }
+
+    .modal-header-info h3 {
+        font-size: 1.25rem;
+    }
+
+    .modal-header-info .display-5 {
+        font-size: 2rem;
+    }
+
+    .avatar-circle {
+        width: 60px !important;
+        height: 60px !important;
+        font-size: 1.5rem !important;
+    }
+
+    .table-custom th, .table-custom td {
+        padding: 0.5rem;
+        font-size: 0.85rem;
+    }
+
+    .grade-box {
+        width: 28px;
+        height: 28px;
+        font-size: 0.8rem;
+    }
+
+    .nav-tabs .nav-link {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.9rem;
+    }
+}
