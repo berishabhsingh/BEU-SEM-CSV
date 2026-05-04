@@ -89,11 +89,54 @@ Papa.parse('all_student_marks.csv', {
         header: true,
         skipEmptyLines: true,
         complete: function(results) {
-            allData = results.data;
+            let parsedData = results.data;
 
-            // Clean SGPA data
-            allData.forEach(row => {
-                row.sgpaNum = parseFloat(row.sgpa) || 0;
+            // Clean SGPA data and group by regNo
+            let groupedData = {};
+
+            parsedData.forEach(row => {
+                // Parse SGPA array if stringified JSON
+                if (row.sgpa && row.sgpa.startsWith('[')) {
+                    try {
+                        row.sgpaArray = JSON.parse(row.sgpa);
+                    } catch (e) {
+                        row.sgpaArray = [];
+                    }
+                } else {
+                    row.sgpaArray = [row.sgpa];
+                }
+
+                // Handle Even semester anomaly
+                let isEvenSem = ["II", "IV", "VI", "VIII"].includes(row.semester);
+                let currentSemScore = isEvenSem && row.cgpa ? parseFloat(row.cgpa) : parseFloat(row.sgpaArray[row.sgpaArray.length - 1] || row.sgpa);
+                row.sgpaNum = isNaN(currentSemScore) ? 0 : currentSemScore;
+
+                if (!groupedData[row.regNo]) {
+                    groupedData[row.regNo] = {
+                        regNo: row.regNo,
+                        name: row.name,
+                        college_name: row.college_name,
+                        course: row.course,
+                        Session: row.Session,
+                        semesters: {}
+                    };
+                }
+
+                // Store semester record
+                groupedData[row.regNo].semesters[row.semester] = row;
+            });
+
+            // Convert to flat array of unique students (using their latest/highest semester data for display)
+            allData = Object.values(groupedData).map(student => {
+                // Find latest semester record
+                const romanMap = { "I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8 };
+                let latestSem = Object.keys(student.semesters).sort((a, b) => (romanMap[b] || 0) - (romanMap[a] || 0))[0];
+
+                // Base student object is the latest semester
+                let baseObj = student.semesters[latestSem];
+                // Attach all semesters data to it
+                baseObj.allSemesters = student.semesters;
+                return baseObj;
             });
 
             totalRecords.textContent = allData.length;
@@ -198,21 +241,36 @@ function applyFilters() {
     // If it's a specific reg number, we ignore dropdown filters to show ALL their semesters.
     const isRegSearch = /^\d{10,}$/.test(term);
 
-    filteredData = allData.filter(row => {
+    filteredData = [];
+    allData.forEach(row => {
         const matchSearch = term === '' ||
                             (row.regNo && row.regNo.toLowerCase().includes(term)) ||
                             (row.name && row.name.toLowerCase().includes(term));
 
         if (isRegSearch && term !== '') {
-            return matchSearch; // Return early, ignoring other filters for this student
+            if (matchSearch) filteredData.push(row);
+            return;
         }
 
         const matchBatch = batch === '' || row.Session === batch;
-        const matchSemester = semester === '' || row.semester === semester;
+
+        // Semester matching logic needs to check if the student has a record for that semester
+        let hasSemesterMatch = semester === '' || !!row.allSemesters[semester];
+
         const matchCollege = college === '' || row.college_name === college;
         const matchBranch = branch === '' || row.course === branch;
 
-        return matchSearch && matchBatch && matchSemester && matchCollege && matchBranch;
+        if (matchSearch && matchBatch && hasSemesterMatch && matchCollege && matchBranch) {
+            // If they are filtering by semester, we should temporarily make that semester the active "row" to show
+            if (semester !== '') {
+                // Return a cloned object representing just that semester so the card displays the filtered info
+                let filteredStudent = Object.assign({}, row.allSemesters[semester]);
+                filteredStudent.allSemesters = row.allSemesters; // preserve reference to all semesters
+                filteredData.push(filteredStudent);
+            } else {
+                filteredData.push(row); // push latest/highest
+            }
+        }
     });
 
     sortData();
@@ -360,20 +418,30 @@ function renderPagination() {
 }
 
 // Ensure the student details modal function is accessible globally
-window.showStudentDetails = function(regNo) {
+window.showStudentDetails = function(regNo, activeSemester = null) {
     const student = allData.find(s => s.regNo === regNo);
     if(!student) return;
+
+    // Determine the semester to display
+    const romanMap = { "I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8 };
+    const availableSemesters = Object.keys(student.allSemesters).sort((a, b) => (romanMap[a] || 0) - (romanMap[b] || 0));
+
+    if (!activeSemester || !student.allSemesters[activeSemester]) {
+        activeSemester = availableSemesters[availableSemesters.length - 1]; // default to highest
+    }
+
+    const currentSemData = student.allSemesters[activeSemester];
 
     // Store active student for theme switching
     document.getElementById('modalTitle').setAttribute('data-reg', regNo);
     document.getElementById('modalTitle').textContent = `${student.name} - Official Record`;
 
-    const isPass = student.fail_any === 'PASS';
+    const isPass = currentSemData.fail_any === 'PASS';
 
     const subjects = [];
     const subjectNames = new Set();
 
-    Object.keys(student).forEach(key => {
+    Object.keys(currentSemData).forEach(key => {
         if(key.endsWith('_code')) {
             const name = key.replace('_code', '');
             subjectNames.add(name);
@@ -381,15 +449,15 @@ window.showStudentDetails = function(regNo) {
     });
 
     subjectNames.forEach(name => {
-        if(student[`${name}_code`]) {
+        if(currentSemData[`${name}_code`]) {
             subjects.push({
                 name: name,
-                code: student[`${name}_code`],
-                ese: parseInt(student[`${name}_ese`]) || 0,
-                ia: parseInt(student[`${name}_ia`]) || 0,
-                total: parseInt(student[`${name}_total`]) || 0,
-                grade: student[`${name}_grade`] || '-',
-                credit: student[`${name}_credit`] || '-'
+                code: currentSemData[`${name}_code`],
+                ese: parseInt(currentSemData[`${name}_ese`]) || 0,
+                ia: parseInt(currentSemData[`${name}_ia`]) || 0,
+                total: parseInt(currentSemData[`${name}_total`]) || 0,
+                grade: currentSemData[`${name}_grade`] || '-',
+                credit: currentSemData[`${name}_credit`] || '-'
             });
         }
     });
@@ -425,6 +493,18 @@ window.showStudentDetails = function(regNo) {
         `;
     });
 
+    let semesterTabsHtml = `<div class="d-flex flex-wrap gap-2 mb-4 justify-content-center">`;
+    availableSemesters.forEach(sem => {
+        const isCurrent = sem === activeSemester;
+        semesterTabsHtml += `
+            <button class="btn ${isCurrent ? 'btn-primary' : 'btn-outline-primary'} btn-sm rounded-pill px-3 shadow-sm fw-bold"
+                    onclick="showStudentDetails('${regNo}', '${sem}')">
+                Semester ${sem}
+            </button>
+        `;
+    });
+    semesterTabsHtml += `</div>`;
+
     const bodyHtml = `
         <div class="modal-header-info p-4 p-md-5">
             <div class="row align-items-center">
@@ -448,10 +528,10 @@ window.showStudentDetails = function(regNo) {
                 <div class="col-md-5">
                     <div class="card border-0 shadow-sm bg-white mb-3" style="border-radius: 15px;">
                         <div class="card-body p-4 text-center">
-                            <span class="d-block text-muted text-uppercase fw-bold mb-2 small" style="letter-spacing: 1px;">Semester ${student.semester} (${student.exam_held})</span>
+                            <span class="d-block text-muted text-uppercase fw-bold mb-2 small" style="letter-spacing: 1px;">Semester ${currentSemData.semester} (${currentSemData.exam_held})</span>
                             <div class="d-flex justify-content-center align-items-end gap-3 mb-3">
                                 <div>
-                                    <h1 class="display-3 fw-bold mb-0 ${student.sgpaNum >= 8 ? 'text-success' : 'text-primary'}">${student.sgpaNum.toFixed(2)}</h1>
+                                    <h1 class="display-3 fw-bold mb-0 ${currentSemData.sgpaNum >= 8 ? 'text-success' : 'text-primary'}">${currentSemData.sgpaNum.toFixed(2)}</h1>
                                     <span class="text-muted fw-bold small">SGPA</span>
                                 </div>
                             </div>
@@ -460,18 +540,19 @@ window.showStudentDetails = function(regNo) {
                             </span>
                         </div>
                     </div>
-                    ${!isPass ? `<div class="alert alert-danger py-2 small fw-bold mb-0 shadow-sm text-center border-0"><i class="fas fa-exclamation-triangle me-2"></i> BACKLOG: ${student.fail_any.replace('FAIL:', '')}</div>` : ''}
+                    ${!isPass ? `<div class="alert alert-danger py-2 small fw-bold mb-0 shadow-sm text-center border-0"><i class="fas fa-exclamation-triangle me-2"></i> BACKLOG: ${currentSemData.fail_any.replace('FAIL:', '')}</div>` : ''}
                 </div>
             </div>
         </div>
 
         <div class="p-4 p-md-5">
+            ${semesterTabsHtml}
             <ul class="nav nav-tabs mb-4" id="myTab" role="tablist">
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active fw-bold" id="marks-tab" data-bs-toggle="tab" data-bs-target="#marks" type="button" role="tab"><i class="fas fa-list-alt me-2"></i>Detailed Marks</button>
                 </li>
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link fw-bold" id="chart-tab" data-bs-toggle="tab" data-bs-target="#chart" type="button" role="tab" onclick="renderChartForStudent('${student.regNo}')"><i class="fas fa-chart-bar me-2"></i>Performance Chart</button>
+                    <button class="nav-link fw-bold" id="chart-tab" data-bs-toggle="tab" data-bs-target="#chart" type="button" role="tab" onclick="renderChartForStudent('${student.regNo}')"><i class="fas fa-chart-line me-2"></i>Performance Chart</button>
                 </li>
             </ul>
 
@@ -516,6 +597,9 @@ window.showStudentDetails = function(regNo) {
     `;
 
     document.getElementById('modalBody').innerHTML = bodyHtml;
+    // We only need to show the modal if it's not already open, but replacing innerHTML will break active tabs
+    // If they were already on the chart tab, maybe we should switch back to marks tab or re-render chart.
+    // For simplicity, just showing it works well.
     studentModal.show();
 }
 
@@ -527,24 +611,53 @@ window.renderChartForStudent = function(regNo) {
     const textColor = isDark ? '#e0e0e0' : '#666';
     const gridColor = isDark ? '#333' : '#e5e5e5';
 
-    const subjects = [];
-    Object.keys(student).forEach(key => {
-        if(key.endsWith('_code') && student[key]) {
-            const name = key.replace('_code', '');
-            const subName = student[`${name}_code`]; // using code as label to keep it short
-            const ese = parseInt(student[`${name}_ese`]) || 0;
-            const ia = parseInt(student[`${name}_ia`]) || 0;
-            if (ese > 0 || ia > 0) {
-                subjects.push({ label: subName, name: name, ese: ese, ia: ia });
-            }
-        }
+    // Build progression data
+    let labels = [];
+    let sgpaData = [];
+
+    const romanMap = { "I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8 };
+    const revRomanMap = { 1: "I", 2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI", 7: "VII", 8: "VIII" };
+
+    // We can rely on sgpaArray which has historical data up to current semester length
+    // But since they may have multiple semester rows, we can just use the highest semester's sgpaArray
+    // Or we can construct it by going through 1 to max semester
+
+    let maxSem = 1;
+    if (student.sgpaArray) maxSem = Math.max(maxSem, student.sgpaArray.length);
+    Object.keys(student.allSemesters).forEach(sem => {
+        maxSem = Math.max(maxSem, romanMap[sem] || 1);
     });
 
-    subjects.sort((a,b) => a.label.localeCompare(b.label));
+    for(let i = 1; i <= maxSem; i++) {
+        let semRoman = revRomanMap[i];
+        labels.push(`Sem ${semRoman}`);
 
-    const labels = subjects.map(s => s.label);
-    const eseData = subjects.map(s => s.ese);
-    const iaData = subjects.map(s => s.ia);
+        let val = null;
+
+        // Try to get from individual semester record if available
+        if (student.allSemesters[semRoman]) {
+            val = student.allSemesters[semRoman].sgpaNum;
+        }
+
+        // If not available as a direct record, see if it's in the sgpaArray of any record
+        if (val === null || val === 0) {
+            // Find the best array. The array at index i-1 is the sgpa.
+            let arrayVal = null;
+            Object.values(student.allSemesters).forEach(record => {
+                 if (record.sgpaArray && record.sgpaArray.length >= i) {
+                     let rawScore = parseFloat(record.sgpaArray[i-1]);
+                     if (!isNaN(rawScore) && rawScore > 0) arrayVal = rawScore;
+                 }
+            });
+            if (arrayVal !== null) {
+                // If it's an even semester, and we don't have the explicit record, we can't easily get CGPA
+                // But we will plot the arrayVal (which is SGPA) as a fallback
+                val = arrayVal;
+            }
+        }
+
+        sgpaData.push(val !== null ? val : 0);
+    }
 
     const ctx = document.getElementById('performanceChart');
     if (!ctx) return;
@@ -554,25 +667,21 @@ window.renderChartForStudent = function(regNo) {
     }
 
     currentChart = new Chart(ctx, {
-        type: 'bar',
+        type: 'line',
         data: {
             labels: labels,
             datasets: [
                 {
-                    label: 'External (ESE)',
-                    data: eseData,
-                    backgroundColor: 'rgba(78, 115, 223, 0.8)',
+                    label: 'SGPA / CGPA Progression',
+                    data: sgpaData,
+                    backgroundColor: 'rgba(78, 115, 223, 0.2)',
                     borderColor: 'rgb(78, 115, 223)',
-                    borderWidth: 1,
-                    borderRadius: 4
-                },
-                {
-                    label: 'Internal (IA)',
-                    data: iaData,
-                    backgroundColor: 'rgba(28, 200, 138, 0.8)',
-                    borderColor: 'rgb(28, 200, 138)',
-                    borderWidth: 1,
-                    borderRadius: 4
+                    borderWidth: 2,
+                    pointBackgroundColor: 'rgb(78, 115, 223)',
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    fill: true,
+                    tension: 0.3
                 }
             ]
         },
@@ -582,26 +691,20 @@ window.renderChartForStudent = function(regNo) {
             plugins: {
                 legend: { labels: { color: textColor, font: { family: "'Segoe UI', sans-serif", weight: 'bold' } } },
                 tooltip: {
-                    mode: 'index', intersect: false,
-                    callbacks: {
-                        title: function(context) {
-                            const idx = context[0].dataIndex;
-                            return subjects[idx].name; // Show full name on hover
-                        }
-                    }
+                    mode: 'index', intersect: false
                 }
             },
             scales: {
                 x: {
-                    stacked: true,
                     ticks: { color: textColor, font: { weight: 'bold' } },
                     grid: { color: gridColor, display: false }
                 },
                 y: {
-                    stacked: true,
+                    min: 0,
+                    max: 10,
                     ticks: { color: textColor },
                     grid: { color: gridColor },
-                    title: { display: true, text: 'Marks', color: textColor, font: { weight: 'bold' } }
+                    title: { display: true, text: 'Score', color: textColor, font: { weight: 'bold' } }
                 }
             }
         }
